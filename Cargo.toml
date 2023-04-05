@@ -1,0 +1,30 @@
+[package]
+name = "binario"
+version = "0.0.1"
+edition = "2021"
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+[dependencies]
+binario-derive = { path = "./derive" }
+tokio = { version = "1.27.0", default-features = false }
+
+[dev-dependencies]
+# Examples/Tests
+tokio = { version = "1.27.0", features = ["macros", "rt-multi-thread", "net", "io-util"] }
+
+# Benchmark
+criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
+pprof = { version = "0.11.1", features = ["flamegraph", "criterion", "protobuf-codec", "frame-pointer"] }
+bincode = "1.3.3"
+tokio-bincode = "0.1.0"
+tokio-util = { version = "0.7.7", features = ["codec"] }
+bytes = "1.4.0"
+futures = "0.3.28"
+
+[workspace]
+members = [
+    "derive",
+]
