@@ -7,6 +7,7 @@ pub struct MyMessage {
     // pub a: i32, // TODO: Impl for primitive
     pub b: String,
     // pub c: Vec<u8>, // TODO: Impl for primitive
+    // pub d: HashMap<String, String>, // TODO: Impl for primitive
 }
 
 // TODO: Support for generics and generic bounds
@@ -61,6 +62,18 @@ async fn main() {
         let msg2: String = decode(buf).await.unwrap();
         assert_eq!(msg, msg2);
         println!("{:?}\n", msg2);
+    }
+
+    // Test max length
+    {
+        let msg = (0..10000).map(|_| "X").collect::<String>();
+        let mut buf = Vec::new();
+        encode(&msg, &mut buf).await.unwrap();
+        assert_eq!(buf.len(), 8 /* Buf len */ + 10000);
+
+        let buf = Cursor::new(buf);
+        let msg2: String = decode(buf).await.unwrap();
+        assert_eq!(msg, msg2);
     }
 
     let msg = vec![1; 5];

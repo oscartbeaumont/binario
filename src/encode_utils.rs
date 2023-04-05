@@ -9,37 +9,60 @@ use tokio::io::AsyncWrite;
 use crate::{Encode, Writer};
 
 /// TODO
-pub struct WriteFixedBuf<const N: usize>([u8; N]);
+pub struct WriteFixedBuf<const N: usize> {
+    buf: [u8; N],
+    cursor: usize,
+}
 
 impl<const N: usize> WriteFixedBuf<N> {
     pub fn new(buf: [u8; N]) -> Self {
-        Self(buf)
+        Self { buf, cursor: 0 }
     }
 }
 
 impl<const N: usize, S: AsyncWrite> Writer<S> for WriteFixedBuf<N> {
     fn poll_writer(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        s: Pin<&mut S>,
+        mut s: Pin<&mut S>,
     ) -> Poll<io::Result<()>> {
-        s.poll_write(cx, &self.0).map(|result| result.map(|_| ())) // TODO: Deal with number of bytes written which is returned
+        loop {
+            match s
+                .as_mut()
+                .poll_write(cx, &self.buf[self.cursor..self.buf.len()])
+            {
+                Poll::Ready(Ok(n)) => {
+                    self.cursor += n;
+
+                    if n == 0 {
+                        return Poll::Ready(Err(io::ErrorKind::WriteZero.into()));
+                    } else if self.cursor == self.buf.len() {
+                        return Poll::Ready(Ok(()));
+                    }
+                }
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
     }
 }
 
 /// TODO
 pub struct WriteBuf<'a, T: Encode> {
-    len: usize,
-    cursor: usize,
+    len_buf: [u8; 8],
+    len_cursor: usize,
     buf: &'a [T],
+    cursor: usize,
 }
 
 impl<'a, T: Encode> WriteBuf<'a, T> {
     pub fn new(len: usize, buf: &'a [T]) -> Self {
+        let len: u64 = len.try_into().unwrap();
         Self {
-            len,
-            cursor: 0,
+            len_buf: len.to_le_bytes(), // x86_64 uses little endian so we gonna stick with it
+            len_cursor: 0,
             buf,
+            cursor: 0,
         }
     }
 }
@@ -50,37 +73,30 @@ impl<'a, T: Encode, S: AsyncWrite> Writer<S> for WriteBuf<'a, T> {
         cx: &mut Context<'_>,
         mut s: Pin<&mut S>,
     ) -> Poll<io::Result<()>> {
-        if self.cursor == 0 {
-            // TODO: This is gonna be an integer overflow so fix that
-            // TODO: Don't use `usize` for wire format cause it's platform specific
-            match s.as_mut().poll_write(cx, &[self.len as u8]) {
+        loop {
+            if self.len_cursor == 8 {
+                break;
+            }
+
+            match s.as_mut().poll_write(cx, &self.len_buf) {
                 Poll::Ready(Ok(n)) => {
-                    if n == 1 {
-                        self.cursor += 1;
-                    } else {
-                        println!("PENDING WRITE");
-                        return Poll::Pending; // TODO: Is this correct?
-                    }
+                    self.len_cursor += n;
                 }
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Pending => return Poll::Pending,
             }
         }
 
-        // TODO: Optimised encode method that works on `Vec<T>` where `T: Encode` so that we don't need `WriteBuf2`
-
-        let mut buf_offset = self.cursor - 1;
-        // TODO: Remove this loop
         loop {
-            let w: T::Writer<'_, S> = self.buf[buf_offset].encode();
+            // TODO: Optimised encode method that works on `Vec<T>` where `T: Encode` so that we don't need `WriteBuf2`
+            let w: T::Writer<'_, S> = self.buf[self.cursor].encode();
             let w = pin!(w);
 
             match w.poll_writer(cx, s.as_mut()) {
-                Poll::Ready(Ok(())) => {
+                Poll::Ready(Ok(_)) => {
                     self.cursor += 1;
-                    buf_offset += 1;
 
-                    if buf_offset == self.len {
+                    if self.cursor == self.buf.len() {
                         return Poll::Ready(Ok(()));
                     }
                 }
@@ -93,17 +109,20 @@ impl<'a, T: Encode, S: AsyncWrite> Writer<S> for WriteBuf<'a, T> {
 
 /// TODO
 pub struct WriteBuf2<'a> {
-    len: usize,
-    cursor: usize,
+    len_buf: [u8; 8],
+    len_cursor: usize,
     buf: &'a [u8],
+    cursor: usize,
 }
 
 impl<'a> WriteBuf2<'a> {
     pub fn new(len: usize, buf: &'a [u8]) -> Self {
+        let len: u64 = len.try_into().unwrap();
         Self {
-            len,
-            cursor: 0,
+            len_buf: len.to_le_bytes(), // x86_64 uses little endian so we gonna stick with it
+            len_cursor: 0,
             buf,
+            cursor: 0,
         }
     }
 }
@@ -114,36 +133,37 @@ impl<'a, S: AsyncWrite> Writer<S> for WriteBuf2<'a> {
         cx: &mut Context<'_>,
         mut s: Pin<&mut S>,
     ) -> Poll<io::Result<()>> {
-        if self.cursor == 0 {
-            // TODO: This is gonna be an integer overflow so fix that
-            // TODO: Don't use `usize` for wire format cause it's platform specific
-            match s.as_mut().poll_write(cx, &[self.len as u8]) {
+        loop {
+            if self.len_cursor == 8 {
+                break;
+            }
+
+            match s.as_mut().poll_write(cx, &self.len_buf) {
                 Poll::Ready(Ok(n)) => {
-                    if n == 1 {
-                        self.cursor += 1;
-                    } else {
-                        println!("PENDING WRITE");
-                        return Poll::Pending; // TODO: Is this correct?
-                    }
+                    self.len_cursor += n;
                 }
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Pending => return Poll::Pending,
             }
         }
 
-        let buf_offset = self.cursor - 1;
-        match s.poll_write(cx, &self.buf[buf_offset..self.len]) {
-            Poll::Ready(Ok(n)) => {
-                self.cursor += n;
+        loop {
+            match s
+                .as_mut()
+                .poll_write(cx, &self.buf[self.cursor..self.buf.len()])
+            {
+                Poll::Ready(Ok(n)) => {
+                    self.cursor += n;
 
-                if self.cursor == self.len + 1 {
-                    return Poll::Ready(Ok(()));
+                    if n == 0 {
+                        return Poll::Ready(Err(io::ErrorKind::WriteZero.into()));
+                    } else if self.cursor == self.buf.len() {
+                        return Poll::Ready(Ok(()));
+                    }
                 }
-
-                return Poll::Pending;
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => return Poll::Pending,
             }
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-            Poll::Pending => return Poll::Pending,
         }
     }
 }

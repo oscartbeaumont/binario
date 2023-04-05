@@ -1,5 +1,5 @@
 use std::{
-    io,
+    io, mem,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -61,15 +61,15 @@ pub struct ReadLenPrefixedBuf<T> {
 }
 
 enum ReadBufState {
-    None,
-    AllocatedBuf(Vec<u8>),
+    ReadingLenth([u8; 8], usize),
+    ReadingBody(Vec<u8>),
     Done,
 }
 
 impl<T> ReadLenPrefixedBuf<T> {
     pub fn new(map: fn(Vec<u8>) -> T) -> Self {
         Self {
-            state: ReadBufState::None,
+            state: ReadBufState::ReadingLenth([0; 8], 0),
             map,
         }
     }
@@ -82,26 +82,34 @@ impl<S: AsyncRead, T> Reader<S> for ReadLenPrefixedBuf<T> {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         mut s: Pin<&mut S>,
-    ) -> Poll<std::io::Result<Self::T>> {
+    ) -> Poll<io::Result<Self::T>> {
         let buf = loop {
             match &mut self.state {
-                ReadBufState::None => {
-                    let mut buf = [0u8; 1];
-                    let mut buf = TokioReadBuf::new(&mut buf);
-                    ready!(s.as_mut().poll_read(cx, &mut buf))?;
-
-                    if buf.remaining() == 0 {
-                        let len = buf.filled()[0] as usize; // TODO: More than a usize for length
-                        let buf = vec![0; len]; // TODO: Can we avoid zeroing out the array cause it might help with performance???
-
-                        self.state = ReadBufState::AllocatedBuf(buf);
-                        continue;
-                    } else {
-                        // A buffer will only ever return nothing if it's the end of the file.
-                        return Err(eof()).into();
+                ReadBufState::ReadingLenth(buf, cursor) => {
+                    let mut buf = TokioReadBuf::new(&mut buf[*cursor..]);
+                    loop {
+                        ready!(s.as_mut().poll_read(cx, &mut buf))?;
+                        if buf.remaining() == 0 {
+                            break;
+                        } else {
+                            // A buffer will only ever return nothing if it's the end of the file.
+                            return Err(eof()).into();
+                        }
                     }
+
+                    let buff = match mem::replace(&mut self.state, ReadBufState::Done) {
+                        ReadBufState::ReadingLenth(b, _) => b,
+                        _ => unreachable!(),
+                    };
+
+                    let len = u64::from_le_bytes(buff);
+                    let len = len.try_into().unwrap(); // TODO: Error handling
+                    let buf = vec![0; len]; // TODO: Can we avoid zeroing out the array cause it might help with performance???
+
+                    self.state = ReadBufState::ReadingBody(buf);
+                    continue;
                 }
-                ReadBufState::AllocatedBuf(b) => break b,
+                ReadBufState::ReadingBody(b) => break b,
                 ReadBufState::Done => panic!("Future polled after completion"),
             }
         };
@@ -116,7 +124,7 @@ impl<S: AsyncRead, T> Reader<S> for ReadLenPrefixedBuf<T> {
                 }
             } else {
                 let buf = match std::mem::replace(&mut self.state, ReadBufState::Done) {
-                    ReadBufState::AllocatedBuf(b) => b,
+                    ReadBufState::ReadingBody(b) => b,
                     _ => unreachable!(),
                 };
 
