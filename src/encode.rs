@@ -5,15 +5,16 @@ use std::{
     task::{Context, Poll},
 };
 
+use pin_project::pin_project;
 use tokio::io::AsyncWrite;
 
 /// TODO
 pub trait Encode {
-    type Writer<'a, S: AsyncWrite>: Writer<S> + 'a
+    type Writer<'a, S: AsyncWrite + 'a>: Writer<S> + 'a
     where
         Self: 'a;
 
-    fn encode<S: AsyncWrite>(&self) -> Self::Writer<'_, S>;
+    fn encode<'a, S: AsyncWrite + 'a>(&'a self) -> Self::Writer<'a, S>;
 }
 
 /// TODO
@@ -23,6 +24,47 @@ pub trait Writer<S> {
         cx: &mut Context<'_>,
         s: Pin<&mut S>,
     ) -> Poll<io::Result<()>>;
+}
+
+/// TODO
+#[doc(hidden)]
+#[pin_project(project = WriterOrDoneProj)]
+pub enum WriterOrDone<'a, T, S>
+where
+    T: Encode + 'a,
+    S: AsyncWrite + 'a,
+{
+    Writer(#[pin] T::Writer<'a, S>),
+    Done,
+}
+
+impl<'a, T, S> WriterOrDone<'a, T, S>
+where
+    T: Encode + 'a,
+    S: AsyncWrite,
+{
+    #[inline]
+    #[doc(hidden)]
+    pub fn unsafe_poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        s: Pin<&mut S>,
+    ) -> Option<Poll<io::Result<()>>> {
+        let this = self.as_mut().project();
+        match this {
+            WriterOrDoneProj::Writer(fut) => match fut.poll_writer(cx, s) {
+                Poll::Ready(result) => {
+                    self.set(Self::Done);
+                    match result {
+                        Ok(_) => None,
+                        Err(e) => Some(Poll::Ready(Err(e))),
+                    }
+                }
+                Poll::Pending => Some(Poll::Pending),
+            },
+            WriterOrDoneProj::Done => None,
+        }
+    }
 }
 
 /// TODO
