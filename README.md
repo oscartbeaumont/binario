@@ -1,3 +1,6 @@
+> [!WARNING]  
+> This project is a proof of concept and is not ready for actual use.
+
 # Binario
 
 An asynchronous zero-fluff binary encoder / decoder
