@@ -1,5 +1,7 @@
 use std::{
-    io, mem,
+    io,
+    marker::PhantomData,
+    mem,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -15,7 +17,7 @@ macro_rules! ready {
     };
 }
 
-use crate::Reader;
+use crate::{Decode, Reader};
 
 fn eof() -> io::Error {
     io::Error::new(io::ErrorKind::UnexpectedEof, "early eof")
@@ -75,7 +77,7 @@ impl<T> ReadLenPrefixedBuf<T> {
     }
 }
 
-impl<S: AsyncRead, T> Reader<S> for ReadLenPrefixedBuf<T> {
+impl<S: AsyncRead, T: Decode> Reader<S> for ReadLenPrefixedBuf<T> {
     type T = T;
 
     fn poll_reader(
@@ -131,5 +133,116 @@ impl<S: AsyncRead, T> Reader<S> for ReadLenPrefixedBuf<T> {
                 return Poll::Ready(Ok((self.map)(buf)));
             }
         }
+    }
+}
+
+pub struct ReadMap<T> {
+    state: ReadMapState,
+    items: usize,
+    phantom: PhantomData<T>,
+}
+
+enum ReadMapState {
+    ReadingLength([u8; 8], usize),
+    // ReadingKey([u8; 8], Vec<u8>),
+    // ReadingValue([u8; 8], Vec<u8>, Vec<u8>),
+    // Done,
+}
+
+impl<T> ReadMap<T> {
+    pub fn new() -> Self {
+        Self {
+            state: ReadMapState::ReadingLength([0; 8], 0),
+            items: 0,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<S: AsyncRead, T> Reader<S> for ReadMap<T> {
+    type T = T;
+
+    fn poll_reader(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        mut s: Pin<&mut S>,
+    ) -> Poll<io::Result<Self::T>> {
+        // println!("POLL");
+        // let mut this = self.as_mut().project();
+        // loop {
+        //     match this.state.as_mut().project() {
+        //         ReadMapState::ReadingLength(mut buff, cursor) => {
+        //             let mut buf = TokioReadBuf::new(&mut buff[*cursor..]);
+        //             ready!(s.as_mut().poll_read(cx, &mut buf))?;
+        //             if buf.remaining() == 0 {
+        //                 let len = u64::from_le_bytes(buff);
+        //                 let len = len.try_into().unwrap(); // TODO: Error handling
+
+        //                 self.items = len;
+
+        //                 println!("{:?}", len);
+
+        //                 todo!();
+        //             } else {
+        //                 // A buffer will only ever return nothing if it's the end of the file.
+        //                 return Err(eof()).into();
+        //             }
+        //         }
+        //     }
+        // }
+
+        // let buf = loop {
+        //     match &mut self.state {
+        //         ReadBufState2::ReadingLenth(buf, cursor) => {
+        //             let mut buf = TokioReadBuf::new(&mut buf[*cursor..]);
+        //             loop {
+        //                 ready!(s.as_mut().poll_read(cx, &mut buf))?;
+        //                 if buf.remaining() == 0 {
+        //                     break;
+        //                 } else {
+        //                     // A buffer will only ever return nothing if it's the end of the file.
+        //                     return Err(eof()).into();
+        //                 }
+        //             }
+
+        //             let buff = match mem::replace(&mut self.state, ReadBufState2::Done) {
+        //                 ReadBufState2::ReadingLenth(b, _) => b,
+        //                 _ => unreachable!(),
+        //             };
+
+        //             let len = u64::from_le_bytes(buff);
+        //             let len = len.try_into().unwrap(); // TODO: Error handling
+        //             let buf = vec![0; len]; // TODO: Can we avoid zeroing out the array cause it might help with performance???
+
+        //             self.state = ReadBufState2::ReadingBody(buf);
+        //             continue;
+        //         }
+        //         ReadBufState2::ReadingBody(b) => break b,
+        //         ReadBufState2::Done => panic!("Future polled after completion"),
+        //     }
+        // };
+
+        // let mut buf = TokioReadBuf::new(buf);
+        // loop {
+        //     let rem = buf.remaining();
+        //     if rem != 0 {
+        //         ready!(s.as_mut().poll_read(cx, &mut buf))?;
+        //         if buf.remaining() == rem {
+        //             return Err(eof()).into();
+        //         }
+        //     } else {
+        //         let buf = match std::mem::replace(&mut self.state, ReadBufState2::Done) {
+        //             ReadBufState2::ReadingBody(b) => b,
+        //             _ => unreachable!(),
+        //         };
+
+        //         // return Poll::Ready(Ok((self.map)(buf)));
+        //         todo!();
+        //     }
+        // }
+
+        // TODO: Encode as Vec<(K, V)> and share existing writing code
+
+        todo!();
     }
 }

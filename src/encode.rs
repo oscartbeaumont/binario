@@ -10,16 +10,24 @@ use tokio::io::AsyncWrite;
 
 /// TODO
 pub trait Encode {
-    type Writer<'a, S: AsyncWrite + 'a>: Writer<S> + 'a
+    /// Writer is the type that will be used to encode the data.
+    /// This should hold a cursor and buffer to keep track of the write progress.
+    type Writer<'a>: Writer + 'a
     where
         Self: 'a;
 
-    fn encode<'a, S: AsyncWrite + 'a>(&'a self) -> Self::Writer<'a, S>;
+    /// Length will determine how many bytes are needed to encode the data.
+    /// This is primarily designed to make map's work however it may be useful to preallocate in-memory buffers.
+    fn byte_len(&self) -> usize;
+
+    /// Create a new writer that will be used to encode the current item.
+    fn encode<'a>(&'a self) -> Self::Writer<'a>;
 }
 
 /// TODO
-pub trait Writer<S> {
-    fn poll_writer(
+pub trait Writer {
+    /// TODO
+    fn poll_writer<S: AsyncWrite>(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         s: Pin<&mut S>,
@@ -29,23 +37,21 @@ pub trait Writer<S> {
 /// TODO
 #[doc(hidden)]
 #[pin_project(project = WriterOrDoneProj)]
-pub enum WriterOrDone<'a, T, S>
+pub enum WriterOrDone<'a, T>
 where
     T: Encode + 'a,
-    S: AsyncWrite + 'a,
 {
-    Writer(#[pin] T::Writer<'a, S>),
+    Writer(#[pin] T::Writer<'a>),
     Done,
 }
 
-impl<'a, T, S> WriterOrDone<'a, T, S>
+impl<'a, T> WriterOrDone<'a, T>
 where
     T: Encode + 'a,
-    S: AsyncWrite,
 {
     #[inline]
     #[doc(hidden)]
-    pub fn unsafe_poll(
+    pub fn unsafe_poll<S: AsyncWrite>(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         s: Pin<&mut S>,

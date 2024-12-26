@@ -12,14 +12,14 @@ pub fn derive(input: proc_macro::TokenStream) -> syn::Result<proc_macro::TokenSt
 
     let crate_name = quote!(binario);
 
-    let (writer_init, writer_fields, writer_impl) = match data {
+    let (writer_init, writer_fields, writer_impl, byte_len_impl) = match data {
         Data::Struct(data) => {
             let fields_init = data.fields.iter().map(|field| {
                 let name = &field.ident;
                 let ty = &field.ty;
 
                 quote! {
-                    #name: #crate_name::WriterOrDone::Writer(<#ty as Encode>::encode::<S>(&self.#name)),
+                    #name: #crate_name::WriterOrDone::Writer(<#ty as Encode>::encode(&self.#name)),
                 }
             }).collect::<TokenStream>();
 
@@ -32,7 +32,7 @@ pub fn derive(input: proc_macro::TokenStream) -> syn::Result<proc_macro::TokenSt
 
                     quote! {
                         #[pin]
-                        #name: #crate_name::WriterOrDone<'a, #ty, S>,
+                        #name: #crate_name::WriterOrDone<'a, #ty>,
                     }
                 })
                 .collect::<TokenStream>();
@@ -52,26 +52,42 @@ pub fn derive(input: proc_macro::TokenStream) -> syn::Result<proc_macro::TokenSt
                 })
                 .collect::<TokenStream>();
 
-            (fields_init, fields, impls)
+            let byte_len_impl = data
+                .fields
+                .iter()
+                .map(|field| {
+                    let name = &field.ident;
+                    let ty = &field.ty;
+
+                    quote! {
+                        + <#ty as Encode>::byte_len(&self.#name)
+                    }
+                })
+                .collect::<TokenStream>();
+
+            (fields_init, fields, impls, byte_len_impl)
         }
         Data::Enum(_) => todo!("Enum's are not supported yet!"),
         Data::Union(_) => todo!("Union's are not supported yet!"),
     };
 
     let encode_impl_header = quote!(impl #crate_name::Encode for #ident); // TODO: Support generics and custom bounds
-    let writer_header =
-        quote!(struct CustomWriter<'a, S: #crate_name::internal::BinarioAsyncWrite>); // TODO: Support generics and custom bounds
-    let writer_impl_header = quote!(impl<'a, S: #crate_name::internal::BinarioAsyncWrite> #crate_name::Writer<S> for CustomWriter<'a, S>); // TODO: Support generics and custom bounds
+    let writer_header = quote!(struct CustomWriter<'a>); // TODO: Support generics and custom bounds
+    let writer_impl_header = quote!(impl<'a> #crate_name::Writer for CustomWriter<'a>); // TODO: Support generics and custom bounds
 
     Ok(quote! {
         const _: () = {
             #[automatically_derived]
             #encode_impl_header {
-                type Writer<'a, S: #crate_name::internal::BinarioAsyncWrite + 'a> = CustomWriter<'a, S>
+                type Writer<'a> = CustomWriter<'a>
                 where
                     Self: 'a;
 
-                fn encode<'a, S: #crate_name::internal::BinarioAsyncWrite + 'a>(&'a self) -> Self::Writer<'a, S> {
+                fn byte_len(&self) -> usize {
+                    0 #byte_len_impl
+                }
+
+                fn encode<'a>(&'a self) -> Self::Writer<'a> {
                     CustomWriter {
                         #writer_init
                     }
@@ -85,7 +101,7 @@ pub fn derive(input: proc_macro::TokenStream) -> syn::Result<proc_macro::TokenSt
             }
 
             #writer_impl_header {
-                fn poll_writer(
+                fn poll_writer<S: #crate_name::internal::BinarioAsyncWrite>(
                     self: std::pin::Pin<&mut Self>,
                     cx: &mut std::task::Context<'_>,
                     mut s: std::pin::Pin<&mut S>,

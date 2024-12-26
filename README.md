@@ -13,4 +13,4 @@ This is very similar to [bincode](https://github.com/bincode-org/bincode) howeve
 
 ## Usage with Tokio
 
-It is **highly** recommended that you use Tokio's buffering utilities in conjunction with this crate to greatly improve performance. Refer to [BufReader](https://docs.rs/tokio/latest/tokio/io/struct.BufReader.html) and [BufWriter](https://docs.rs/tokio/latest/tokio/io/struct.BufWriter.html) for more information.
+It is **highly recommended** that you use Tokio's buffering utilities in conjunction with this crate to greatly improve performance. Refer to [BufReader](https://docs.rs/tokio/latest/tokio/io/struct.BufReader.html) and [BufWriter](https://docs.rs/tokio/latest/tokio/io/struct.BufWriter.html) for more information.

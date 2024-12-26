@@ -9,8 +9,8 @@ use tokio::{
 };
 use tokio_util::codec::{Encoder, Framed};
 
-const BIG_STRING_LEN: usize = 245; // TODO: Make higher once my impl is fixed
-const BIG_STRING_NETWORK_ITERS: usize = 1000;
+const BIG_STRING_LEN: usize = 1000;
+const BIG_STRING_NETWORK_ITERS: usize = 500;
 
 #[tokio::main]
 async fn main() {

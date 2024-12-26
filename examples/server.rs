@@ -21,10 +21,10 @@ async fn main() {
                 match decode::<String, _>(&mut stream).await {
                     Ok(string) => {
                         println!("Reqs: {}", COUNTER.fetch_add(1, Ordering::Relaxed));
-                        assert_eq!(string.len(), 245);
+                        assert_eq!(string.len(), 1000);
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                        assert_eq!(COUNTER.load(Ordering::Relaxed) - 1, 1000);
+                        assert_eq!(COUNTER.load(Ordering::Relaxed) - 1, 500);
                         println!("Done");
                         process::exit(0);
                     }

@@ -25,14 +25,14 @@ async fn main() {
                     match result.map_err(|v| *v) {
                         Ok(string) => {
                             println!("Reqs: {}", COUNTER.fetch_add(1, Ordering::Relaxed));
-                            assert_eq!(string.len(), 245);
+                            assert_eq!(string.len(), 1000);
                         }
                         Err(bincode::ErrorKind::Io(e))
                             if e.kind() == std::io::ErrorKind::UnexpectedEof =>
                         {
                             println!("EOF"); // TODO: For some reason we get a stupid amount of EOF's
 
-                            // assert_eq!(COUNTER.load(Ordering::Relaxed) - 1, 1000);
+                            // assert_eq!(COUNTER.load(Ordering::Relaxed) - 1, 500);
                             // process::exit(0);
                             break;
                         }
