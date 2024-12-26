@@ -1,7 +1,7 @@
 [package]
 name = "binario"
 description = "An asynchronous zero-fluff binary encoder/decoder"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/oscartbeaumont/binario"
@@ -11,7 +11,7 @@ name = "benchmarks"
 harness = false
 
 [dependencies]
-binario-derive = { path = "./derive" }
+binario-derive = { version = "0.0.2", path = "./derive" }
 pin-project = "1.0.12"
 tokio = { version = "1.27.0", default-features = false }
 

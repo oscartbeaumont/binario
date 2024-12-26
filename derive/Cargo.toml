@@ -1,7 +1,10 @@
 [package]
 name = "binario-derive"
-version = "0.0.1"
+description = "Macros for Binario, an asynchronous zero-fluff binary encoder/decoder"
+version = "0.0.2"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/oscartbeaumont/binario"
 
 [lib]
 proc-macro = true

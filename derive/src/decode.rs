@@ -12,64 +12,63 @@ pub fn derive(input: proc_macro::TokenStream) -> syn::Result<proc_macro::TokenSt
 
     let crate_name = quote!(binario);
 
-    let (reader_init, reader_fields, reader_impl, reader_return_init) =
-        match data {
-            Data::Struct(data) => {
-                let fields_init = data.fields.iter().map(|field| {
+    let (reader_init, reader_fields, reader_impl, reader_return_init) = match data {
+        Data::Struct(data) => {
+            let fields_init = data.fields.iter().map(|field| {
                 let name = &field.ident;
                 let ty = &field.ty;
 
                 quote! {
-                    #name: #crate_name::ValueOrReader::Reader(<#ty as Decode>::decode::<S>()),
+                    #name: #crate_name::ValueOrReader::Reader(<#ty as #crate_name::Decode>::decode::<S>()),
                 }
             }).collect::<TokenStream>();
 
-                let fields = data
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        let name = &field.ident;
-                        let ty = &field.ty;
+            let fields = data
+                .fields
+                .iter()
+                .map(|field| {
+                    let name = &field.ident;
+                    let ty = &field.ty;
 
-                        quote! {
-                            #[pin]
-                            #name: #crate_name::ValueOrReader<#ty, S>,
+                    quote! {
+                        #[pin]
+                        #name: #crate_name::ValueOrReader<#ty, S>,
+                    }
+                })
+                .collect::<TokenStream>();
+
+            let impls = data
+                .fields
+                .iter()
+                .map(|field| {
+                    let name = &field.ident;
+
+                    quote! {
+                        match this.#name.unsafe_poll(cx, s.as_mut()) {
+                            Some(result) => return result,
+                            None => {}
                         }
-                    })
-                    .collect::<TokenStream>();
+                    }
+                })
+                .collect::<TokenStream>();
 
-                let impls = data
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        let name = &field.ident;
+            let return_init = data
+                .fields
+                .iter()
+                .map(|field| {
+                    let name = &field.ident;
 
-                        quote! {
-                            match this.#name.unsafe_poll(cx, s.as_mut()) {
-                                Some(result) => return result,
-                                None => {}
-                            }
-                        }
-                    })
-                    .collect::<TokenStream>();
+                    quote! {
+                        #name: self.#name.unsafe_take(),
+                    }
+                })
+                .collect::<TokenStream>();
 
-                let return_init = data
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        let name = &field.ident;
-
-                        quote! {
-                            #name: self.#name.unsafe_take(),
-                        }
-                    })
-                    .collect::<TokenStream>();
-
-                (fields_init, fields, impls, return_init)
-            }
-            Data::Enum(_) => todo!("Enum's are not supported yet!"),
-            Data::Union(_) => todo!("Union's are not supported yet!"),
-        };
+            (fields_init, fields, impls, return_init)
+        }
+        Data::Enum(_) => todo!("Enum's are not supported yet!"),
+        Data::Union(_) => todo!("Union's are not supported yet!"),
+    };
 
     let decode_impl_header = quote!(impl #crate_name::Decode for #ident); // TODO: Support generics and custom bounds
     let reader_header = quote!(struct CustomReader<S: #crate_name::internal::BinarioAsyncRead>); // TODO: Support generics and custom bounds

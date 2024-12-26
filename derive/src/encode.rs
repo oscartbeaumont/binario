@@ -19,7 +19,7 @@ pub fn derive(input: proc_macro::TokenStream) -> syn::Result<proc_macro::TokenSt
                 let ty = &field.ty;
 
                 quote! {
-                    #name: #crate_name::WriterOrDone::Writer(<#ty as Encode>::encode(&self.#name)),
+                    #name: #crate_name::WriterOrDone::Writer(<#ty as #crate_name::Encode>::encode(&self.#name)),
                 }
             }).collect::<TokenStream>();
 
@@ -60,7 +60,7 @@ pub fn derive(input: proc_macro::TokenStream) -> syn::Result<proc_macro::TokenSt
                     let ty = &field.ty;
 
                     quote! {
-                        + <#ty as Encode>::byte_len(&self.#name)
+                        + <#ty as #crate_name::Encode>::byte_len(&self.#name)
                     }
                 })
                 .collect::<TokenStream>();
