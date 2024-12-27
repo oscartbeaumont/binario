@@ -12,43 +12,15 @@ pub fn derive(input: proc_macro::TokenStream) -> syn::Result<proc_macro::TokenSt
 
     let crate_name = quote!(binario);
 
-    let (writer_init, writer_fields, writer_impl, byte_len_impl) = match data {
+    let (encode_impl, byte_len_impl) = match data {
         Data::Struct(data) => {
-            let fields_init = data.fields.iter().map(|field| {
-                let name = &field.ident;
-                let ty = &field.ty;
-
-                quote! {
-                    #name: #crate_name::WriterOrDone::Writer(<#ty as #crate_name::Encode>::encode(&self.#name)),
-                }
-            }).collect::<TokenStream>();
-
-            let fields = data
+            let encode_impl = data
                 .fields
                 .iter()
                 .map(|field| {
-                    let name = &field.ident;
-                    let ty = &field.ty;
+                    let ident = &field.ident;
 
-                    quote! {
-                        #[pin]
-                        #name: #crate_name::WriterOrDone<'a, #ty>,
-                    }
-                })
-                .collect::<TokenStream>();
-
-            let impls = data
-                .fields
-                .iter()
-                .map(|field| {
-                    let name = &field.ident;
-
-                    quote! {
-                        match this.#name.unsafe_poll(cx, s.as_mut()) {
-                            Some(result) => return result,
-                            None => {}
-                        }
-                    }
+                    quote!(<_ as #crate_name::Encode>::encode(&self.#ident, s.as_mut()).await?;)
                 })
                 .collect::<TokenStream>();
 
@@ -65,52 +37,25 @@ pub fn derive(input: proc_macro::TokenStream) -> syn::Result<proc_macro::TokenSt
                 })
                 .collect::<TokenStream>();
 
-            (fields_init, fields, impls, byte_len_impl)
+            (encode_impl, byte_len_impl)
         }
         Data::Enum(_) => todo!("Enum's are not supported yet!"),
         Data::Union(_) => todo!("Union's are not supported yet!"),
     };
 
     let encode_impl_header = quote!(impl #crate_name::Encode for #ident); // TODO: Support generics and custom bounds
-    let writer_header = quote!(struct CustomWriter<'a>); // TODO: Support generics and custom bounds
-    let writer_impl_header = quote!(impl<'a> #crate_name::Writer for CustomWriter<'a>); // TODO: Support generics and custom bounds
 
     Ok(quote! {
         const _: () = {
             #[automatically_derived]
             #encode_impl_header {
-                type Writer<'a> = CustomWriter<'a>
-                where
-                    Self: 'a;
+                async fn encode<S: #crate_name::internal::BinarioAsyncWrite>(&self, mut s: std::pin::Pin<&mut S>) -> std::io::Result<()> {
+                    #encode_impl
+                    Ok(())
+                }
 
                 fn byte_len(&self) -> usize {
                     0 #byte_len_impl
-                }
-
-                fn encode<'a>(&'a self) -> Self::Writer<'a> {
-                    CustomWriter {
-                        #writer_init
-                    }
-                }
-            }
-
-            #[automatically_derived]
-            #[pin_project::pin_project(project = CustomWriterProj)]
-            pub #writer_header {
-                #writer_fields
-            }
-
-            #writer_impl_header {
-                fn poll_writer<S: #crate_name::internal::BinarioAsyncWrite>(
-                    self: std::pin::Pin<&mut Self>,
-                    cx: &mut std::task::Context<'_>,
-                    mut s: std::pin::Pin<&mut S>,
-                ) -> std::task::Poll<std::io::Result<()>> {
-                    let this = self.project();
-
-                    #writer_impl
-
-                    std::task::Poll::Ready(Ok(()))
                 }
             }
         };

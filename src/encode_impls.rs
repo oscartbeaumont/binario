@@ -1,167 +1,160 @@
 use std::{
     borrow::Cow,
-    collections::{btree_map, hash_map, BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap},
+    io,
     mem::size_of,
+    pin::Pin,
     sync::Arc,
 };
 
-use crate::{Encode, WriteBuf, WriteBuf2, WriteFixedBuf, WriteMap};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
+
+use crate::Encode;
 
 const LEN_SIZE: usize = size_of::<u64>();
 
 impl Encode for u8 {
-    type Writer<'a> = WriteFixedBuf<1>
-    where
-        Self: 'a;
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        s.write_u8(*self).await
+    }
 
     fn byte_len(&self) -> usize {
         1
-    }
-
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        WriteFixedBuf::new([*self])
     }
 }
 
 // TODO: All number types -> bigger types will need to be encoded over multiple bytes
 
 impl Encode for bool {
-    type Writer<'a> = WriteFixedBuf<1>
-    where
-        Self: 'a;
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        s.write_u8(*self as u8).await
+    }
 
     fn byte_len(&self) -> usize {
         1
-    }
-
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        WriteFixedBuf::new([*self as u8])
     }
 }
 
 impl Encode for &'static str {
-    type Writer<'a> = WriteBuf<'a, u8>
-    where
-        Self: 'a;
-
-    fn byte_len(&self) -> usize {
-        1
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        let len: u64 = self.len().try_into().unwrap();
+        s.write_all(&len.to_le_bytes()).await?;
+        s.write_all(self.as_bytes()).await
     }
 
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        WriteBuf::new(self.byte_len(), self.as_bytes())
+    fn byte_len(&self) -> usize {
+        LEN_SIZE + self.len()
     }
 }
 
 impl Encode for String {
-    type Writer<'a> = WriteBuf2<'a>
-    where
-        Self: 'a;
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        let len: u64 = self.len().try_into().unwrap();
+        s.write_all(&len.to_le_bytes()).await?;
+        s.write_all(self.as_bytes()).await
+    }
 
     fn byte_len(&self) -> usize {
         LEN_SIZE + self.len()
-    }
-
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        WriteBuf2::new(self.len(), self.as_bytes())
     }
 }
 
 impl<'b> Encode for Cow<'b, str> {
-    type Writer<'a> = WriteBuf<'a, u8>
-    where
-        Self: 'a;
-
-    fn byte_len(&self) -> usize {
-        // LEN_SIZE
-        //     + match self {
-        //         Cow::Borrowed(s) => s.len(),
-        //         Cow::Owned(s) => s.len(),
-        //     }
-        todo!();
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        let len: u64 = self.len().try_into().unwrap();
+        s.write_all(&len.to_le_bytes()).await?;
+        s.write_all(self.as_bytes()).await
     }
-
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        WriteBuf::new(self.byte_len(), self.as_bytes())
-    }
-}
-
-impl<T: Encode> Encode for Vec<T> {
-    type Writer<'a> = WriteBuf<'a, T>
-    where
-        Self: 'a;
 
     fn byte_len(&self) -> usize {
         LEN_SIZE + self.len()
     }
+}
 
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        WriteBuf::new(self.len(), self)
+impl<T: Encode> Encode for Vec<T> {
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        let len: u64 = self.len().try_into().unwrap();
+        s.write_all(&len.to_le_bytes()).await?;
+        for item in self {
+            item.encode(s.as_mut()).await?;
+        }
+        Ok(())
+    }
+
+    fn byte_len(&self) -> usize {
+        LEN_SIZE + self.iter().map(|i| i.byte_len()).sum::<usize>()
     }
 }
 
 impl<'b, T: Encode + 'b> Encode for &'b T {
-    type Writer<'a> = T::Writer<'a>
-    where
-        Self: 'a;
-
-    fn byte_len(&self) -> usize {
-        T::byte_len(&self)
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        T::encode(self, s.as_mut()).await
     }
 
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        T::encode(self)
+    fn byte_len(&self) -> usize {
+        T::byte_len(self)
     }
 }
 
 impl<T: Encode> Encode for Arc<T> {
-    type Writer<'a> = T::Writer<'a>
-    where
-        Self: 'a;
-
-    fn byte_len(&self) -> usize {
-        T::byte_len(&self)
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        T::encode(self, s.as_mut()).await
     }
 
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        T::encode(self)
+    fn byte_len(&self) -> usize {
+        T::byte_len(self)
     }
 }
 
 // TODO: Rc, RefCell, etc
 
 impl<T: Encode> Encode for [T] {
-    type Writer<'a> = WriteBuf<'a, T>
-    where
-        Self: 'a;
-
-    fn byte_len(&self) -> usize {
-        LEN_SIZE + self.len()
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        let len: u64 = self.len().try_into().unwrap();
+        s.write_all(&len.to_le_bytes()).await?;
+        for item in self {
+            item.encode(s.as_mut()).await?;
+        }
+        Ok(())
     }
 
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        WriteBuf::new(self.len(), self)
+    fn byte_len(&self) -> usize {
+        LEN_SIZE + self.iter().map(|i| i.byte_len()).sum::<usize>()
     }
 }
 
 impl<const N: usize, T: Encode> Encode for [T; N] {
-    type Writer<'a> = WriteBuf<'a, T>
-    where
-        Self: 'a;
-
-    fn byte_len(&self) -> usize {
-        LEN_SIZE + N
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        let len: u64 = self.len().try_into().unwrap();
+        s.write_all(&len.to_le_bytes()).await?;
+        for item in self {
+            item.encode(s.as_mut()).await?;
+        }
+        Ok(())
     }
 
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        WriteBuf::new(N, self)
+    fn byte_len(&self) -> usize {
+        LEN_SIZE + self.iter().map(|i| i.byte_len()).sum::<usize>()
     }
 }
 
 impl<K: Encode, V: Encode> Encode for HashMap<K, V> {
-    type Writer<'a> = WriteMap<'a, hash_map::Iter<'a, K, V>, K, V>
-    where
-        Self: 'a;
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        let len: u64 = self.len().try_into().unwrap();
+        s.write_all(&len.to_le_bytes()).await?;
+        for (k, v) in self {
+            // TODO: Are the key and value lengths needed?
+            let k_len: u64 = k.byte_len().try_into().unwrap();
+            let v_len: u64 = v.byte_len().try_into().unwrap();
+
+            s.write_all(&k_len.to_le_bytes()).await?;
+            k.encode(s.as_mut()).await?;
+
+            s.write_all(&v_len.to_le_bytes()).await?;
+            v.encode(s.as_mut()).await?;
+        }
+        Ok(())
+    }
 
     fn byte_len(&self) -> usize {
         // Length of map, key length, value body length, value length, key body length
@@ -170,17 +163,26 @@ impl<K: Encode, V: Encode> Encode for HashMap<K, V> {
                 .iter()
                 .map(|(k, v)| LEN_SIZE + k.byte_len() + LEN_SIZE + v.byte_len())
                 .sum::<usize>()
-    }
-
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        WriteMap::new(self.len(), self.iter())
     }
 }
 
 impl<K: Encode, V: Encode> Encode for BTreeMap<K, V> {
-    type Writer<'a> = WriteMap<'a, btree_map::Iter<'a, K, V>, K, V>
-    where
-        Self: 'a;
+    async fn encode<S: AsyncWrite>(&self, mut s: Pin<&mut S>) -> io::Result<()> {
+        let len: u64 = self.len().try_into().unwrap();
+        s.write_all(&len.to_le_bytes()).await?;
+        for (k, v) in self {
+            // TODO: Are the key and value lengths needed?
+            let k_len: u64 = k.byte_len().try_into().unwrap();
+            let v_len: u64 = v.byte_len().try_into().unwrap();
+
+            s.write_all(&k_len.to_le_bytes()).await?;
+            k.encode(s.as_mut()).await?;
+
+            s.write_all(&v_len.to_le_bytes()).await?;
+            v.encode(s.as_mut()).await?;
+        }
+        Ok(())
+    }
 
     fn byte_len(&self) -> usize {
         // Length of map, key length, value body length, value length, key body length
@@ -189,10 +191,6 @@ impl<K: Encode, V: Encode> Encode for BTreeMap<K, V> {
                 .iter()
                 .map(|(k, v)| LEN_SIZE + k.byte_len() + LEN_SIZE + v.byte_len())
                 .sum::<usize>()
-    }
-
-    fn encode<'a>(&'a self) -> Self::Writer<'a> {
-        WriteMap::new(self.len(), self.iter())
     }
 }
 
