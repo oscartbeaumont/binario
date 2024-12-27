@@ -17,7 +17,6 @@ harness = false
 
 [dependencies]
 binario-derive = { version = "0.0.2", path = "./derive" }
-pin-project = "1.1.7"
 tokio = { version = "1.42.0", default-features = false }
 
 [dev-dependencies]

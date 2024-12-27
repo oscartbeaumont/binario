@@ -143,25 +143,18 @@ impl<K: Encode, V: Encode> Encode for HashMap<K, V> {
         let len: u64 = self.len().try_into().unwrap();
         s.write_all(&len.to_le_bytes()).await?;
         for (k, v) in self {
-            // TODO: Are the key and value lengths needed?
-            let k_len: u64 = k.byte_len().try_into().unwrap();
-            let v_len: u64 = v.byte_len().try_into().unwrap();
-
-            s.write_all(&k_len.to_le_bytes()).await?;
             k.encode(s.as_mut()).await?;
-
-            s.write_all(&v_len.to_le_bytes()).await?;
             v.encode(s.as_mut()).await?;
         }
         Ok(())
     }
 
     fn byte_len(&self) -> usize {
-        // Length of map, key length, value body length, value length, key body length
+        // Length of map, key body, value body
         LEN_SIZE
             + self
                 .iter()
-                .map(|(k, v)| LEN_SIZE + k.byte_len() + LEN_SIZE + v.byte_len())
+                .map(|(k, v)| k.byte_len() + v.byte_len())
                 .sum::<usize>()
     }
 }
@@ -171,25 +164,18 @@ impl<K: Encode, V: Encode> Encode for BTreeMap<K, V> {
         let len: u64 = self.len().try_into().unwrap();
         s.write_all(&len.to_le_bytes()).await?;
         for (k, v) in self {
-            // TODO: Are the key and value lengths needed?
-            let k_len: u64 = k.byte_len().try_into().unwrap();
-            let v_len: u64 = v.byte_len().try_into().unwrap();
-
-            s.write_all(&k_len.to_le_bytes()).await?;
             k.encode(s.as_mut()).await?;
-
-            s.write_all(&v_len.to_le_bytes()).await?;
             v.encode(s.as_mut()).await?;
         }
         Ok(())
     }
 
     fn byte_len(&self) -> usize {
-        // Length of map, key length, value body length, value length, key body length
+        // Length of map, key body, value body
         LEN_SIZE
             + self
                 .iter()
-                .map(|(k, v)| LEN_SIZE + k.byte_len() + LEN_SIZE + v.byte_len())
+                .map(|(k, v)| k.byte_len() + v.byte_len())
                 .sum::<usize>()
     }
 }
