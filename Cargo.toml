@@ -17,7 +17,7 @@ harness = false
 
 [dependencies]
 binario-derive = { version = "0.0.3", path = "./derive" }
-tokio = { version = "1.42.0", default-features = false }
+tokio = { version = "1.42.0", default-features = false, features = ["io-util"] }
 
 [dev-dependencies]
 # Examples/Tests
